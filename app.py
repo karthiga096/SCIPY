@@ -12,71 +12,86 @@ st.set_page_config(
 
 st.title("📊 Student Academic Performance Analysis (SciPy + Time Series)")
 
-# ------------------ File Upload ------------------
+# ------------------ File Upload (HIDDEN LABEL) ------------------
 uploaded_file = st.file_uploader(
-    "📂 Upload Excel File (Academic Year vs Marks)",
-    type=["xlsx"]
+    "",
+    type=["xlsx"],
+    label_visibility="collapsed"
 )
 
 # ------------------ Main Logic ------------------
 if uploaded_file is not None:
 
-    # Load Excel
     df = pd.read_excel(uploaded_file)
 
-    # Show raw data
-    st.subheader("📋 Raw Dataset")
-    st.dataframe(df.head())
-
-    # ------------------ Data Preprocessing ------------------
+    # Preprocess
     df['Academic_Year'] = df['Academic_Year'].str.slice(0, 4).astype(int)
     df['Academic_Year'] = pd.to_datetime(df['Academic_Year'], format='%Y')
     df.set_index('Academic_Year', inplace=True)
 
     df['Marks'] = pd.to_numeric(df['Marks'])
 
-    # ------------------ SciPy Processing ------------------
-    marks_data = df['Marks'].values
+    # SciPy processing
+    marks = df['Marks'].values
+    df['Detrended_Marks'] = detrend(marks)
 
-    # Detrending
-    df['Detrended_Marks'] = detrend(marks_data)
+    window = min(21, len(df))
+    if window % 2 == 0:
+        window -= 1
 
-    # Safe window length for Savitzky–Golay
-    window_length = min(21, len(df))
-    if window_length % 2 == 0:
-        window_length -= 1
-
-    df['Smoothed_Marks'] = savgol_filter(
-        df['Marks'], window_length=window_length, polyorder=3
-    )
-
-    # Year-wise change
+    df['Smoothed_Marks'] = savgol_filter(df['Marks'], window, 3)
     df['Marks_Change'] = df['Smoothed_Marks'].diff()
 
-    # Peak detection
-    peaks, _ = find_peaks(
-        df['Smoothed_Marks'],
-        height=df['Smoothed_Marks'].mean()
-    )
-
+    peaks, _ = find_peaks(df['Smoothed_Marks'], height=df['Smoothed_Marks'].mean())
     df['Peaks'] = False
     df.loc[df.index[peaks], 'Peaks'] = True
 
-    # ------------------ Student Selection ------------------
+    # Sidebar
     st.sidebar.header("🎓 Student Filter")
-
-    student_id = st.sidebar.selectbox(
-        "Select Student ID",
-        df['Student_ID'].unique()
-    )
+    student_id = st.sidebar.selectbox("Student ID", df['Student_ID'].unique())
 
     student_df = df[df['Student_ID'] == student_id]
     student_name = student_df['Student_Name'].iloc[0]
+    st.sidebar.success(f"Student: {student_name}")
 
-    st.sidebar.success(f"Student Name: {student_name}")
-
-    st.subheader("📊 Processed Student Data")
+    # Display data
+    st.subheader("📋 Student Data")
     st.dataframe(student_df)
 
-    # ------------------ Plot 1: Marks Trend ------------------
+    # Plot 1
     st.subheader("📈 Marks Trend")
+    fig1 = plt.figure(figsize=(12, 5))
+    plt.plot(student_df.index, student_df['Marks'], label="Original")
+    plt.plot(student_df.index, student_df['Smoothed_Marks'], label="Smoothed")
+    plt.scatter(
+        student_df.index[student_df['Peaks']],
+        student_df['Smoothed_Marks'][student_df['Peaks']],
+        label="Peaks"
+    )
+    plt.legend()
+    plt.grid()
+    st.pyplot(fig1)
+
+    # Plot 2
+    st.subheader("📉 Detrended Marks")
+    fig2 = plt.figure(figsize=(12, 4))
+    plt.plot(student_df.index, student_df['Detrended_Marks'])
+    plt.axhline(0, linestyle="--")
+    plt.grid()
+    st.pyplot(fig2)
+
+    # Plot 3
+    st.subheader("📊 Year-wise Change")
+    fig3 = plt.figure(figsize=(12, 4))
+    plt.plot(student_df.index, student_df['Marks_Change'])
+    plt.axhline(0, linestyle="--")
+    plt.grid()
+    st.pyplot(fig3)
+
+    # Download
+    st.download_button(
+        "⬇️ Download CSV",
+        student_df.to_csv().encode("utf-8"),
+        "processed_student_marks.csv",
+        "text/csv"
+    )
